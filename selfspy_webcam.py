@@ -3,16 +3,19 @@
 # selfspy_webcam.py
 # photologs through your webcam
 
+import os
 import cv
 import time
 
 cv.StartWindowThread()
 
-cv.NamedWindow("capture")
-
 cap = cv.CaptureFromCAM(0)
 
-for i in range(100):
+home = os.getenv("HOME")
+
+for i in range(2):
     f = cv.QueryFrame(cap)
-    cv.ShowImage("capture", f)
-    time.sleep(0.5)
+    timestamp = time.strftime("%FT%T.jpg").replace("-","_").replace(":","_")
+    path = "%s/.selfspy/photolog/%s" % (home, timestamp)
+    cv.SaveImage(path, f)
+    time.sleep(2)
