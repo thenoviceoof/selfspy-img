@@ -12,10 +12,13 @@ cv.StartWindowThread()
 cap = cv.CaptureFromCAM(0)
 
 home = os.getenv("HOME")
+directory = "%s/.selfspy/photolog/" % home
+if not os.path.exists(directory):
+    os.makedirs(directory)
 
 for i in range(2):
     f = cv.QueryFrame(cap)
     timestamp = time.strftime("%FT%T.jpg").replace("-","_").replace(":","_")
-    path = "%s/.selfspy/photolog/%s" % (home, timestamp)
+    path = directory + timestamp
     cv.SaveImage(path, f)
     time.sleep(2)
