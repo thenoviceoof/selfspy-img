@@ -9,6 +9,8 @@ import os
 import time
 import cv
 
+import Image # PIL
+
 if __name__=="__main__":
     # get args
     parser = argparse.ArgumentParser(description='Photolog through your webcam')
@@ -27,9 +29,9 @@ if __name__=="__main__":
     parser.add_argument('-n', '--no-password', dest='passwordp', default=False,
                         const=True, action='store_const',
                         help='Overrides -p, stores the images unencrypted')
-    parser.add_argument('-nc', '--no-compress', dest='compress', default=True,
-                        const=False, action='store_const',
-                        help='Disables compression on the images')
+    parser.add_argument('-c', '--compression', dest='compression',
+                        default=70, type=int,
+                        help='Parameter for jpeg compression (1-95)')
     parser.add_argument('--dir', dest='dir', default=None,
                         help=('Directory in which to store the images: '
                               'default is ~/.selfspy/photolog/'))
@@ -37,7 +39,7 @@ if __name__=="__main__":
                         const=True, default=False, action='store_const',
                         help='Daemonizes the process')
     parser.add_argument('-f', '--format', dest='format',
-                        default='%Y-%m-%dT%H-%M-%S', type=str,
+                        default='%Y_%m_%dT%H_%M_%S', type=str,
                         help=('Override the file name formatting of the '
                               'generated image files. Note that if you do '
                               'not include a time unit granular enough for '
@@ -57,6 +59,7 @@ if __name__=="__main__":
         os.makedirs(directory)
 
     size = tuple([int(s) for s in args.size.split("x")])[0:2]
+    compression = max(1, min(args.compression, 95))
 
     # do an initial computation
     frame = cv.QueryFrame(cap)
@@ -67,13 +70,19 @@ if __name__=="__main__":
 
     # run the main event loop
     while True:
+        timestamp = time.strftime(args.format)
+        path = directory + timestamp + '.jpg'
+
         frame = cv.QueryFrame(cap)
+        # BGR is the default colorspace for opencv
+        cv.CvtColor(frame,frame, cv.CV_BGR2RGB)
+        img = Image.fromstring("RGB", cv.GetSize(frame), frame.tostring())
+
         if resize:
-            resized = cv.CreateMat(size[1], size[0], cv.CV_8UC3)
-            cv.Resize(frame, resized)
-            frame = resized
+            img = img.resize(size)
 
-        timestamp = time.strftime(args.format+'.jpg')
+        f = open(path, "wb")
+        img.save(f, 'JPEG', quality=compression)
+        f.close()
 
-        cv.SaveImage(directory + timestamp, resized)
         time.sleep(args.interval)
