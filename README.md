@@ -1,4 +1,4 @@
-selfspy-webcam
+selfspy-img
 ================================================================================
 
 Photolog yourself for fun and profit!
@@ -6,15 +6,15 @@ Photolog yourself for fun and profit!
 Usage
 --------------------------------------------------------------------------------
 
-`./selfspy-webcam.py`
+`./selfspy_img.py`
 
 
 Options
 --------------------------------------------------------------------------------
 
-run `./selfspy-webcam.py --help` to find some help, like so:
+run `./selfspy_img.py --help` to find some help, like so:
 
-    ./selfspy_webcam.py --help 
+    ./selfspy_img.py --help 
     usage: selfspy_webcam.py [-h] [-i INTERVAL] [-s SIZE] [-p PASSWORD] [-np]
                              [-c COMPRESSION] [-a] [--dir DIR] [-d] [-f FORMAT]
 

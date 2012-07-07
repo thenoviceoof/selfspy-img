@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 ################################################################################
-# selfspy_webcam.py
+# selfspy_img.py
 # photologs through your webcam
 
 import argparse
@@ -42,7 +42,8 @@ def main_loop(filename_format, data_directory, compression, resize, archive):
 
 if __name__=="__main__":
     # get args
-    parser = argparse.ArgumentParser(description='Photolog through your webcam')
+    parser = argparse.ArgumentParser(
+        description='Photolog through your webcam (and screenshots)')
     parser.add_argument('-i', '--interval', dest='interval',
                         default=10, type=int,
                         help=('Time interval in seconds between snapshots'))
@@ -55,7 +56,7 @@ if __name__=="__main__":
                         help=('Passkey with which to encrypt the images, ' 
                               'after optional compression with -c. If '
                               'neither -p nor -n are specified, then '
-                              'a passkey will be queried.'))
+                              'a passkey will be queried. NOT IMPLEMENTED'))
     parser.add_argument('-np', '--no-password', dest='passwordp', default=False,
                         const=True, action='store_const',
                         help='Overrides -p, stores the images unencrypted')
