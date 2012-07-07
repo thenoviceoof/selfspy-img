@@ -55,13 +55,23 @@ if __name__=="__main__":
         directory = args.dir
     if not os.path.exists(directory):
         os.makedirs(directory)
+
     size = tuple([int(s) for s in args.size.split("x")])[0:2]
+
+    # do an initial computation
+    frame = cv.QueryFrame(cap)
+    if cv.GetSize(frame) == size:
+        resize = False
+    else:
+        resize = True
 
     # run the main event loop
     while True:
         frame = cv.QueryFrame(cap)
-        resized = cv.CreateMat(size[1], size[0], cv.CV_8UC3)
-        cv.Resize(frame, resized)
+        if resize:
+            resized = cv.CreateMat(size[1], size[0], cv.CV_8UC3)
+            cv.Resize(frame, resized)
+            frame = resized
 
         timestamp = time.strftime(args.format+'.jpg')
 
