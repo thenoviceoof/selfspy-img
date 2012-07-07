@@ -27,6 +27,7 @@ TODO
    - save this as a png
  - do store on sufficient diff (-t --threshold option)
    - see: cvabsdiff
+ - add a lockfile
  - ensure interop
  - testing?
  - requirements.txt file - test in a virtualenv

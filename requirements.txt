@@ -1,0 +1,4 @@
+python>=2.7
+python-daemon>=1.5.5
+# python-opencv>=
+PIL>=1.1.7
