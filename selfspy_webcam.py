@@ -12,7 +12,7 @@ import cv
 if __name__=="__main__":
     # get args
     parser = argparse.ArgumentParser(description='Photolog through your webcam')
-    parser.add_argument('-i', '--interval', dest='interval', default=5,
+    parser.add_argument('-i', '--interval', dest='interval', default=10,
                         type=int,
                         help=('Time interval in seconds between snapshots'))
     parser.add_argument('-s', '--size', dest='size', default='320x240',
@@ -37,15 +37,14 @@ if __name__=="__main__":
                         const=True, default=False, action='store_const',
                         help='Daemonizes the process')
     parser.add_argument('-f', '--format', dest='format',
-                        default='%FT%T', type=str,
+                        default='%Y-%m-%dT%H-%M-%S', type=str,
                         help=('Override the file name formatting of the '
                               'generated image files. Note that if you do '
                               'not include a time unit granular enough for '
-                              'your interval, your files will be overwritten.')
-    parser.add_argument('-s', '--seperator', dest='seperator',
-                        default='')
+                              'your interval, your files will be overwritten.'))
     args = parser.parse_args()
 
+    ########################################
     # start photologging
     cap = cv.CaptureFromCAM(0)
 
@@ -56,10 +55,15 @@ if __name__=="__main__":
         directory = args.dir
     if not os.path.exists(directory):
         os.makedirs(directory)
+    size = tuple([int(s) for s in args.size.split("x")])[0:2]
 
+    # run the main event loop
     while True:
-        f = cv.QueryFrame(cap)
-        timestamp = time.strftime(args.format+'.jpg').replace("-","_").replace(":","_")
-        path = directory + timestamp
-        cv.SaveImage(path, f)
+        frame = cv.QueryFrame(cap)
+        resized = cv.CreateMat(size[1], size[0], cv.CV_8UC3)
+        cv.Resize(frame, resized)
+
+        timestamp = time.strftime(args.format+'.jpg')
+
+        cv.SaveImage(directory + timestamp, resized)
         time.sleep(args.interval)
