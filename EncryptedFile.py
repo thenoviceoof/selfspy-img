@@ -24,9 +24,10 @@ class EncryptedFile(object):
     HASH_SHA384 = 9
     HASH_SHA512 = 10
 
-    def __init__(self, file_obj, pass_phrase, mode='w', iv=None,
+    def __init__(self, file_obj, pass_phrase, mode='w', iv=None, salt=None,
                  block_size=16, buffer_size=1024, timestamp=None,
-                 encryption_algo=ALGO_AES256, hash_algo=HASH_SHA1):
+                 encryption_algo=ALGO_AES256, hash_algo=HASH_SHA256,
+                 key_method=S2K_ITERATED, iterated_count=(16, 6)):
         '''
         Open a pipe to an encrypted file
 
@@ -39,13 +40,16 @@ class EncryptedFile(object):
 
         iv: initialization vector, randomly generated if not
             given. same size as block_size
-        encryption_algo: which ALGO_* to encrypt the plaintext with
+        key_method: which S2K_* method to use
         hash_algo: which HASH_* to convert the passphrase with
+        encryption_algo: which ALGO_* to encrypt the plaintext with
 
         block_size: used by the cipher
         buffer_size: how much data should be slurped up before encrypting
         timestamp <int>: timestamp, if any, to be attached to the literal data
             if not given, just writes zeroes
+        iterated_count: a tuple (base, exp), where base is between [16, 32),
+            and the exp is between 6 and 22
         '''
         if not int(buffer_size/block_size)*block_size == buffer_size:
             raise ValueError('buffer_size is not a multiple of the block_size')
@@ -83,21 +87,58 @@ class EncryptedFile(object):
             else:
                 self.iv = iv
             # write the symmetric encryption session packet
-            self.file.write(chr((1 << 7) | (1 << 6) | 3))
-            self.file.write(chr(4)) # header length
-            self.file.write(chr(4)) # version
-            self.file.write(chr(self.ALGO_AES256)) # sym algo
+            header = ''
+            header += chr((1 << 7) | (1 << 6) | 3)
+            header += chr(0) # header length
+            header += chr(4) # version
+            header += chr(encryption_algo) # sym algo
 
-            self.file.write(chr(self.S2K_SIMPLE)) # S2K
-            self.file.write(chr(self.HASH_SHA256)) # S2K hash algo
+            header += chr(key_method) # S2K
+            header += chr(hash_algo) # S2K hash algo
+            # generate 8b salt
+            if key_method in [self.S2K_SALTED, self.S2K_ITERATED]:
+                if not salt:
+                    salt = urandom(8)
+                header += salt
+            if key_method == self.S2K_ITERATED:
+                if iterated_count[0] < 16 or iterated_count[0] >= 32:
+                    raise ValueError('iterated_count base illegal')
+                if iterated_count[1] < 6 or iterated_count[1] >= 22:
+                    raise ValueError('iterated_count exp illegal')
+                count = iterated_count[0] << iterated_count[1]
+                packed_base = iterated_count[0] - 16
+                packed_exp  = iterated_count[1] - 6 << 4
+                packed_count = chr(packed_exp & packed_base)
+                header += packed_count
+
+            header = header[0] + chr(len(header)-2) + header[2:]
+            self.file.write(header)
+
             # write the encrypted data packet header
             self.file.write(chr((1 << 7) | (1 << 6) | 9))
         else:
             raise ValueError('Only \'wb\' mode supported')
 
-        hsh = hashlib.sha256()
-        hsh.update(pass_phrase)
-        self.key = hsh.digest()
+        if key_method == self.S2K_SIMPLE:
+            hsh = hashlib.sha256()
+            hsh.update(pass_phrase)
+            self.key = hsh.digest()
+        elif key_method == self.S2K_SALTED:
+            hsh = hashlib.sha256()
+            hsh.update(salt)
+            hsh.update(pass_phrase)
+            self.key = hsh.digest()
+        elif key_method == self.S2K_ITERATED:
+            # hash <count> number of bytes
+            hsh = hashlib.sha256()
+            i = 0
+            key = salt + pass_phrase
+            while i + len(key) < count:
+                hsh.update(key)
+                i += len(key)
+            hsh.update(key[:count - i])
+            self.key = hsh.digest()
+
         self.cipher = AES.new(self.key, AES.MODE_OPENPGP,
                               self.iv, block_size = block_size)
 
@@ -181,7 +222,6 @@ class EncryptedFile(object):
             self._lit_buffer += self._raw_buffer[:self.buffer_size]
             self._raw_buffer = self._raw_buffer[self.buffer_size :]
             
-
         if final:
             final_len = self._final_length(len(self._raw_buffer))
             self._lit_buffer += final_len
