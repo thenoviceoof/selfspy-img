@@ -49,27 +49,27 @@ class EncryptedFile(object):
         self.buffer_size = buffer_size
 
         self.mode = mode
-        self.raw_buffer = ''
-        self.lit_buffer = ''
-        self.enc_buffer = ''
+        if len(self.mode)>1:
+            self.bin_mode = self.mode[1] == 'b'
+        self._raw_buffer = ''
+        self._lit_buffer = ''
+        self._enc_buffer = ''
         self.closed = False
 
         if isinstance(file_obj, basestring):
             if len(file_obj) > 0xff:
                 raise ValueError('File name is too long')
             self.file = open(file_obj, mode)
-            self.name = file_obj ### !!!
+            self.name = file_obj
         elif isinstance(file_obj, file):
             self.file = file_obj
             self.name = file_obj.name[:0xff]
         else:
             raise TypeError
 
-        ### !!! binary flag does something: text -> CR/LF format
-        if mode == 'wb':
-            # if iv:
-            #     self.iv = urandom(self.blocksize)
-            self.iv = chr(0) * self.block_size
+        if mode[0] == 'w':
+            if not iv:
+                self.iv = urandom(self.block_size)
             # write the symmetric encryption session packet
             self.file.write(chr((1 << 7) | (1 << 6) | 3))
             self.file.write(chr(4)) # header length
@@ -90,20 +90,20 @@ class EncryptedFile(object):
                               self.iv, block_size = block_size)
 
         # add the literal block id byte to the unencrypted buffer
-        self.lit_buffer += chr((1 << 7) | (1 << 6) | 11)
-        ### !!! mode ['b', 't']
-        self.raw_buffer += chr(0x62) #'b'
+        self._lit_buffer += chr((1 << 7) | (1 << 6) | 11)
+        # set mode
+        self._raw_buffer += 'b' if self.bin_mode else 't'
         # write out file name
-        self.raw_buffer += chr(len(self.name))
-        self.raw_buffer += self.name
+        self._raw_buffer += chr(len(self.name))
+        self._raw_buffer += self.name
         # write out 4-octet date
         if timestamp:
-            self.raw_buffer += chr(timestamp >> 24 & 0xff)
-            self.raw_buffer += chr(timestamp >> 16 & 0xff)
-            self.raw_buffer += chr(timestamp >> 8  & 0xff)
-            self.raw_buffer += chr(timestamp & 0xff)
+            self._raw_buffer += chr(timestamp >> 24 & 0xff)
+            self._raw_buffer += chr(timestamp >> 16 & 0xff)
+            self._raw_buffer += chr(timestamp >> 8  & 0xff)
+            self._raw_buffer += chr(timestamp & 0xff)
         else:
-            self.raw_buffer += '\0' * 4
+            self._raw_buffer += '\0' * 4
 
     def _semi_length(self):
         '''
@@ -134,31 +134,27 @@ class EncryptedFile(object):
         '''
         Given things in the encrypted buffer, write them
         '''
-        i = 0
-        while len(self.enc_buffer) >= self.buffer_size:
+        while len(self._enc_buffer) >= self.buffer_size:
             self.file.write(self._semi_length())
             # write the encrypted data in blocks
-            start = self.blocksize * i
-            end = self.blocksize * (i + 1)
-            self.file.write(self.enc_buffer[start:end])
-            i += 1
-        self.enc_buffer = self.enc_buffer[self.buffer_size * i:]
+            self.file.write(self._enc_buffer[:self.buffer_size])
+            self._enc_buffer = self._enc_buffer[self.buffer_size:]
 
         if final:
-            self.file.write(self._final_length(len(self.enc_buffer)))
-            self.file.write(self.enc_buffer)
+            self.file.write(self._final_length(len(self._enc_buffer)))
+            self.file.write(self._enc_buffer)
     def _encrypt_buffer(self, final=False):
         '''
         Given literal packet data, encrypt it
         '''
-        cnt = int(math.floor(len(self.lit_buffer)/self.block_size))
+        cnt = int(math.floor(len(self._lit_buffer)/self.block_size))
         bs = cnt * self.block_size
         # encrypt all data that fits cleanly in the block size
-        self.enc_buffer += self.cipher.encrypt(self.lit_buffer[:bs])
-        self.lit_buffer = self.lit_buffer[bs:]
+        self._enc_buffer += self.cipher.encrypt(self._lit_buffer[:bs])
+        self._lit_buffer = self._lit_buffer[bs:]
 
         if final:
-            self.enc_buffer += self.cipher.encrypt(self.lit_buffer)
+            self._enc_buffer += self.cipher.encrypt(self._lit_buffer)
 
         self._write_enc_buffer(final=final)
     def _write_buffer(self, final=False):
@@ -166,29 +162,31 @@ class EncryptedFile(object):
         Given things in the raw buffer, attach metadata and put them
         in the literal buffer
         '''
-        i = 0
         # add the literal data packet metadata
-        while len(self.raw_buffer) >= self.buffer_size:
-            self.lit_buffer += self._semi_length()
+        while len(self._raw_buffer) >= self.buffer_size:
+            self._lit_buffer += self._semi_length()
             # write/encrypt the literal data in blocks
-            start = self.buffer_size * i
-            end = self.buffer_size * (i + 1)
-            self.lit_buffer += self.raw_buffer[start:end]
-            i += 1
-        self.raw_buffer = self.raw_buffer[self.buffer_size * i:]
+            self._lit_buffer += self._raw_buffer[:self.buffer_size]
+            self._raw_buffer = self._raw_buffer[self.buffer_size :]
+            
 
         if final:
-            final_len = self._final_length(len(self.raw_buffer))
-            self.lit_buffer += final_len
-            self.lit_buffer += self.raw_buffer
+            final_len = self._final_length(len(self._raw_buffer))
+            self._lit_buffer += final_len
+            self._lit_buffer += self._raw_buffer
 
         self._encrypt_buffer(final=final)
 
     def write(self, data):
-        self.raw_buffer += data
+        self._raw_buffer += data
         self._write_buffer()
-    def writelines():
-        pass
+    def writelines(self, lines):
+        if self.bin_mode:
+            raise ValueError('Textual method used with binary data')
+        for line in lines:
+            self._raw_buffer += line
+            self._raw_buffer += '\r\n' # use CR/LF
+        self._write_buffer()
 
     def seek(offset, whence=None):
         pass
@@ -214,7 +212,7 @@ if __name__=='__main__':
     import time
     m = hashlib.sha256()
     m.update(time.ctime())
-    msg = 'aa'
+    msg = 'aa' * 1000
     print(msg)
 
     b = EncryptedFile('mu.gpg', encryption_key='w')
