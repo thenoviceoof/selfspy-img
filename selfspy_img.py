@@ -13,13 +13,15 @@ import cv
 import Image # PIL
 import zipfile
 
-def main_loop(filename_format, data_directory, compression, resize, archive):
+def main_loop(filename_format, data_directory, compression, resize, archive,
+              verbose):
     if archive:
         archive_path = '%s/webcam_archive.zip' % data_directory
         archive = zipfile.ZipFile(archive_path, 'a', zipfile.ZIP_DEFLATED)
 
     while True:
         timestamp = time.strftime(filename_format)
+        if verbose: print('[i] Taking shot at %s' % timestamp)
         img_path = '%s/webcam/%s.jpg' % (data_directory, timestamp)
 
         frame = cv.QueryFrame(cap)
@@ -28,13 +30,16 @@ def main_loop(filename_format, data_directory, compression, resize, archive):
         img = Image.fromstring("RGB", cv.GetSize(frame), frame.tostring())
 
         if resize:
+            if verbose: print('[i] Resizing...')
             img = img.resize(resize)
 
+        if verbose: print('[i] Saving to path %s' % img_path)
         f = open(img_path, "wb")
         img.save(f, 'JPEG', quality=compression)
         f.close()
 
         if archive:
+            if verbose: print('[i] Archiving...')
             archive.write(img_path, os.path.basename(img_path))
             os.remove(img_path)
 
@@ -82,20 +87,26 @@ if __name__=="__main__":
                               'generated image files. Note that if you do '
                               'not include a time unit granular enough for '
                               'your interval, your files will be overwritten.'))
+    parser.add_argument('-v', '--verbose', dest='verbose',
+                        default=False, const=True, action='store_const',
+                        help='Display debug and informational messages')
     args = parser.parse_args()
 
     ########################################
     # argument computation
     cap = cv.CaptureFromCAM(0)
+    verbose = args.verbose
 
     home = os.getenv("HOME")
     if args.dir is None:
+        if verbose: print('[i] Using default directory')
         directory = "%s/.selfspy/photolog/" % home
     else:
         directory = args.dir
     webcam_dir = directory + 'webcam/'
     # add screenshot dir here
     if not os.path.exists(webcam_dir):
+        if verbose: print('[i] Creating necessary directory')
         os.makedirs(webcam_dir)
 
     resize = tuple([int(s) for s in args.size.split("x")])[0:2]
@@ -104,9 +115,13 @@ if __name__=="__main__":
     # do an initial computation
     frame = cv.QueryFrame(cap)
     if cv.GetSize(frame) == resize:
+        if verbose: print('[i] No resize necessary')
         resize = None
 
     if args.daemonize:
+        if verbose: print('[i] Daemonizing...')
         with daemon.DaemonContext():
-            main_loop(args.format, directory, compression, resize, args.archive)
-    main_loop(args.format, directory, compression, resize, args.archive)
+            main_loop(args.format, directory, compression, resize, args.archive,
+                      verbose)
+    main_loop(args.format, directory, compression, resize, args.archive,
+              verbose)
