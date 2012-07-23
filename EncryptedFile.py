@@ -9,10 +9,10 @@ import math
 import re
 
 class EncryptedFile(object):
-    BLOWFISH = 4
-    AES128 = 7
-    AES196 = 8
-    AES256 = 9
+    ALGO_BLOWFISH = 4
+    ALGO_AES128 = 7
+    ALGO_AES196 = 8
+    ALGO_AES256 = 9
 
     S2K_SIMPLE = 0
     S2K_SALTED = 1
@@ -24,8 +24,9 @@ class EncryptedFile(object):
     HASH_SHA384 = 9
     HASH_SHA512 = 10
 
-    def __init__(self, file_obj, encryption_key, mode='w', iv=None,
-                 block_size=16, buffer_size=1024, timestamp=None):
+    def __init__(self, file_obj, pass_phrase, mode='w', iv=None,
+                 block_size=16, buffer_size=1024, timestamp=None,
+                 encryption_algo=ALGO_AES256, hash_algo=HASH_SHA1):
         '''
         Open a pipe to an encrypted file
 
@@ -33,8 +34,13 @@ class EncryptedFile(object):
             a string should be a path
             file object: write through to the file
 
+        pass_phrase: passphrase
         mode: usual file modes
-        encryption_key: passphrase
+
+        iv: initialization vector, randomly generated if not
+            given. same size as block_size
+        encryption_algo: which ALGO_* to encrypt the plaintext with
+        hash_algo: which HASH_* to convert the passphrase with
 
         block_size: used by the cipher
         buffer_size: how much data should be slurped up before encrypting
@@ -72,11 +78,15 @@ class EncryptedFile(object):
         if mode[0] == 'w':
             if not iv:
                 self.iv = urandom(self.block_size)
+            elif len(iv) != self.block_size:
+                raise ValueError('IV has to be one block size')
+            else:
+                self.iv = iv
             # write the symmetric encryption session packet
             self.file.write(chr((1 << 7) | (1 << 6) | 3))
             self.file.write(chr(4)) # header length
             self.file.write(chr(4)) # version
-            self.file.write(chr(self.AES256)) # sym algo
+            self.file.write(chr(self.ALGO_AES256)) # sym algo
 
             self.file.write(chr(self.S2K_SIMPLE)) # S2K
             self.file.write(chr(self.HASH_SHA256)) # S2K hash algo
@@ -86,7 +96,7 @@ class EncryptedFile(object):
             raise ValueError('Only \'wb\' mode supported')
 
         hsh = hashlib.sha256()
-        hsh.update(encryption_key)
+        hsh.update(pass_phrase)
         self.key = hsh.digest()
         self.cipher = AES.new(self.key, AES.MODE_OPENPGP,
                               self.iv, block_size = block_size)
@@ -181,52 +191,60 @@ class EncryptedFile(object):
 
     def write(self, data):
         # make sure the data
-        ### WE DO NOT HANDLE CR/LF SEQUENCES SPLIT ACROSS WRITES
-        if not self.bin_mode:
-            data = re.sub('[^\r]\n', '\r\n', data)
-            data = re.sub('\r[^\n]', '\r\n', data)
         self._raw_buffer += data
+        if not self.bin_mode:
+            self._raw_buffer = re.sub('([^\r])\n', '\\1\r\n', self._raw_buffer)
+            self._raw_buffer = re.sub('\r([^\n])', '\r\n\\1', self._raw_buffer)
+        if self._raw_buffer[-1] == '\r':
+            # don't write yet: we might have more coming
+            return
         self._write_buffer()
     def writelines(self, lines):
         if self.bin_mode:
             raise ValueError('Textual method used with binary data')
         for line in lines:
+            line = re.sub('([^\r])\n', '\\1\r\n', line)
+            line = re.sub('\r([^\n])', '\r\n\\1', line)
             self._raw_buffer += line
             self._raw_buffer += '\r\n' # use CR/LF
         self._write_buffer()
 
-    def seek(offset, whence=None):
-        pass
-    def tell():
-        pass
+    def read(self, *args, **kwargs):
+        raise NotImplementedError()
+    def readlines(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    def seek(self, offset, whence=None):
+        raise NotImplementedError()
+    def tell(self):
+        raise NotImplementedError()
 
     def close(self):
+        # make sure we catch a final \r, which was waiting for the next write
+        if not self.bin_mode and self._raw_buffer[-1] == '\r':
+            self._raw_buffer += '\n'
         self._write_buffer(final=True)
         self.file.close()
 
-    def flush():
+    def flush(self):
         '''
         Merely flushes the encapsulated file object
         '''
         self.file.flush()
-    def isatty():
+    def isatty(self):
         return False
 
 if __name__=='__main__':
     '''
     Documentation and self-testing
+
+    To decrypt:
+    gpg <file name>
     '''
-    import time
-    m = hashlib.sha256()
-    m.update(time.ctime())
-    msg = '''Hello world
-I want to take your socks away from you
-yes
-yes
-aruh.r,chuett
-uhr.,chrd,uhetonhih'''
+    msg = '''Hello world'''
+    print("Encrypted message:")
     print(msg)
 
-    b = EncryptedFile('mu.gpg', encryption_key='w')
+    b = EncryptedFile('example.gpg', pass_phrase='w')
     b.write(msg)
     b.close()
