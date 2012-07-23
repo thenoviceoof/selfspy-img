@@ -3,12 +3,27 @@
 ################################################################################
 
 import hashlib
-from Crypto.Cipher import Blowfish
+from Crypto.Cipher import Blowfish, AES
 from os import urandom
 
-class BlowfishEncryptedFile(object):
-    def __init__(self, file_obj, encryption_key, mode='w', iv=None,
-                 block_size=8, cache_size=1024, timestamp=None):
+class EncryptedFile(object):
+    BLOWFISH = 4
+    AES128 = 7
+    AES196 = 8
+    AES256 = 9
+
+    S2K_SIMPLE = 0
+    S2K_SALTED = 1
+    S2K_ITERATED = 3
+
+    HASH_MD5 = 1
+    HASH_SHA1 = 2
+    HASH_SHA256 = 8
+    HASH_SHA384 = 9
+    HASH_SHA512 = 10
+
+    def __init__(self, file_obj, encryption_key, mode='wb', iv=None,
+                 block_size=16, buffer_size=1024, timestamp=None):
         '''
         Open a pipe to an encrypted file
 
@@ -20,19 +35,21 @@ class BlowfishEncryptedFile(object):
         encryption_key: passphrase
 
         block_size: used by the cipher
-        cache_size: how much data should be slurped up before encrypting
+        buffer_size: how much data should be slurped up before encrypting
         timestamp <int>: timestamp, if any, to be attached to the literal data
             if not given, just writes zeroes
         '''
+        if not int(buffer_size/block_size)*block_size == buffer_size:
+            raise ValueError('buffer_size is not a multiple of the block_size')
         self.block_size = block_size
-        # check cache_size: can set later
-        if not  cache_size > 512:
+        # check buffer_size: can set later
+        if not buffer_size > 512:
             raise ValueError('First block_size must be larger than 512b')
-        self.cache_size = cache_size
+        self.buffer_size = buffer_size
 
         self.mode = mode
-        self.lit_cache = ''
-        self.enc_cache = ''
+        self.lit_buffer = ''
+        self.enc_buffer = ''
         self.closed = False
 
         if isinstance(file_obj, basestring):
@@ -50,41 +67,51 @@ class BlowfishEncryptedFile(object):
         if mode == 'wb':
             # if iv:
             #     self.iv = urandom(self.blocksize)
-            self.iv = chr(0) * 8
+            self.iv = chr(0) * self.block_size
             # write the symmetric encryption session packet
-            pass
+            self.file.write(chr((1 << 7) | (1 << 6) | 3))
+            self.file.write(chr(4)) # header length
+            self.file.write(chr(4)) # version
+            self.file.write(chr(self.AES256)) # sym algo
+
+            self.file.write(chr(self.S2K_SIMPLE)) # S2K
+            self.file.write(chr(self.HASH_SHA256)) # S2K hash algo
             # write the encrypted data packet header
-            self.file.write(chr(1 << 7 | 9))
+            self.file.write(chr((1 << 7) | (1 << 6) | 9))
         else:
             raise ValueError('Only \'wb\' mode supported')
 
-        self.cipher = Blowfish.new(encryption_key, Blowfish.MODE_OPENPGP,
-                                   self.iv, block_size = block_size)
+        hsh = hashlib.sha256()
+        hsh.update(encryption_key)
+        self.key = hsh.digest()
+        self.cipher = AES.new(self.key, AES.MODE_OPENPGP,
+                              self.iv, block_size = block_size)
 
-        # add the literal block id byte to the unencrypted cache
-        self.lit_cache += chr(1 << 7 | 11)
-        # mode ['b', 't']
-        self.lit_cache += 'b'
+        # add the literal block id byte to the unencrypted buffer
+        self.lit_buffer += chr((1 << 7) | (1 << 6) | 11)
+        self._first = True
+        ### !!! mode ['b', 't']
+        self.lit_buffer += 'b'
         # write out file name
-        self.lit_cache += chr(len(self.name))
-        self.lit_cache += self.name
+        self.lit_buffer += chr(len(self.name))
+        self.lit_buffer += self.name
         # write out 4-octet date
         if timestamp:
-            self.lit_cache += chr(timestamp >> 24 & 0xff)
-            self.lit_cache += chr(timestamp >> 16 & 0xff)
-            self.lit_cache += chr(timestamp >> 8  & 0xff)
-            self.lit_cache += chr(timestamp & 0xff)
+            self.lit_buffer += chr(timestamp >> 24 & 0xff)
+            self.lit_buffer += chr(timestamp >> 16 & 0xff)
+            self.lit_buffer += chr(timestamp >> 8  & 0xff)
+            self.lit_buffer += chr(timestamp & 0xff)
         else:
-            self.lit_cache += '\0'*32
+            self.lit_buffer += '\0'*4
 
     def _semi_length(self):
         '''
         Produce the byte encoding an intermediate block of data
         '''
-        # make sure the cache size fits the semi-packet length constraints
-        # keep this here, self.cache_size is user-available
+        # make sure the buffer size fits the semi-packet length constraints
+        # keep this here, self.buffer_size is user-available
         power = int(math.log(1024, 2))
-        assert self.cache_size == 2**power)
+        assert self.buffer_size == 2**power
         return chr(224 + power)
     def _final_length(self, length):
         '''
@@ -102,45 +129,54 @@ class BlowfishEncryptedFile(object):
                     chr((length >> 8)  & 0xff) +
                     chr(length & 0xff))
 
-    def _write_enc_cache(self, final=False):
+    def _write_enc_buffer(self, final=False):
         '''
-        Given things in the encrypted cache, write them
+        Given things in the encrypted buffer, write them
         '''
         i = 0
-        while len(self.enc_cache) >= self.cache_size:
+        while len(self.enc_buffer) >= self.buffer_size:
             self.file.write(self._semi_length())
             # write the encrypted data in blocks
             start = self.blocksize * i
             end = self.blocksize * (i + 1)
-            self.file.write(self.enc_cache[start:end])
+            self.file.write(self.enc_buffer[start:end])
             i += 1
-        self.enc_cache = self.enc_cache[self.cache_size * i:]
+        self.enc_buffer = self.enc_buffer[self.buffer_size * i:]
 
         if final:
-            self.file.write(self._final_length())
-            self.file.write(self.enc_cache)
-    def _write_cache(self, final=False):
+            self.file.write(self._final_length(len(self.enc_buffer)))
+            self.file.write(self.enc_buffer)
+    def _write_buffer(self, final=False):
         '''
-        Given things in the literal cache, encrypt and put them in the
-        encrypted cache
+        Given things in the literal buffer, encrypt and put them in the
+        encrypted buffer
         '''
         i = 0
-        while len(self.lit_cache) >= self.cache_size:
-            self.enc_cache += self.cipher.encrypt(self._semi_length())
+        while len(self.lit_buffer) >= self.buffer_size:
+            if self._first:
+                self.lit_buffer += 
+                self.lit_buffer += self._semi_length()
+                self._first = False
+            self.lit_buffer += 
+            self.lit_buffer += 
+            self.enc_buffer += self.cipher.encrypt(self._semi_length())
             # write/encrypt the literal data in blocks
             start = self.blocksize * i
             end = self.blocksize * (i + 1)
-            self.enc_cache += self.cipher.encrypt(self.lit_cache[start:end])
+            self.enc_buffer += self.cipher.encrypt(self.lit_buffer[start:end])
             i += 1
-        self.lit_cache = self.lit_cache[self.cache_size * i:]
+        self.lit_buffer = self.lit_buffer[self.buffer_size * i:]
 
         if final:
-            self.enc_cache += self.cipher.encrypt(self._final_length())
-            self.enc_cache += self.cipher.encrypt(self.lit_cache)
+            final_len = self._final_length(len(self.lit_buffer))
+            self.lit_buffer += final_len
+            self.enc_buffer += self.cipher.encrypt(self.lit_buffer)
+
+        self._write_enc_buffer(final=final)
 
     def write(self, data):
-        self.lit_cache += data
-        self._write_cache()
+        self.lit_buffer += data
+        self._write_buffer()
     def writelines():
         pass
 
@@ -150,7 +186,7 @@ class BlowfishEncryptedFile(object):
         pass
 
     def close(self):
-        self._write_cache(final=True)
+        self._write_buffer(final=True)
         self.file.close()
 
     def flush():
@@ -168,9 +204,9 @@ if __name__=='__main__':
     import time
     m = hashlib.sha256()
     m.update(time.ctime())
-    msg = m.hexdigest() + 'aoeuhtns'
+    msg = 'Hello world'
     print(msg)
 
-    b = BlowfishEncryptedFile('mu', 'w', 'aoeu')
+    b = EncryptedFile('mu.gpg', encryption_key='w')
     b.write(msg)
     b.close()
