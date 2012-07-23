@@ -12,9 +12,12 @@ import cv
 
 import Image # PIL
 import zipfile
+from EncryptedFile import EncryptedFile
+
+import getpass
 
 def main_loop(filename_format, data_directory, compression, resize, archive,
-              verbose):
+              password, verbose):
     if archive:
         archive_path = '%s/webcam_archive.zip' % data_directory
         archive = zipfile.ZipFile(archive_path, 'a', zipfile.ZIP_DEFLATED)
@@ -23,6 +26,8 @@ def main_loop(filename_format, data_directory, compression, resize, archive,
         timestamp = time.strftime(filename_format)
         if verbose: print('[i] Taking shot at %s' % timestamp)
         img_path = '%s/webcam/%s.jpg' % (data_directory, timestamp)
+        if password:
+            img_path += '.gpg'
 
         frame = cv.QueryFrame(cap)
         # BGR is the default colorspace for opencv
@@ -35,6 +40,10 @@ def main_loop(filename_format, data_directory, compression, resize, archive,
 
         if verbose: print('[i] Saving to path %s' % img_path)
         f = open(img_path, "wb")
+        if password:
+            if verbose: print('[i] Encrypting file...')
+            f = EncryptedFile(f, pass_phrase=password, mode='wb',
+                              encryption_algo=EncryptedFile.ALGO_BLOWFISH)
         img.save(f, 'JPEG', quality=compression)
         f.close()
 
@@ -43,6 +52,7 @@ def main_loop(filename_format, data_directory, compression, resize, archive,
             archive.write(img_path, os.path.basename(img_path))
             os.remove(img_path)
 
+        if verbose: print('[i] Done, sleeping...')
         time.sleep(args.interval)
 
 if __name__=="__main__":
@@ -62,8 +72,8 @@ if __name__=="__main__":
                               'after optional compression with -c. If '
                               'neither -p nor -n are specified, then '
                               'a passkey will be queried. NOT IMPLEMENTED'))
-    parser.add_argument('-np', '--no-password', dest='passwordp', default=False,
-                        const=True, action='store_const',
+    parser.add_argument('-np', '--no-password', dest='passwordp', default=True,
+                        const=False, action='store_const',
                         help='Overrides -p, stores the images unencrypted')
 
     parser.add_argument('-c', '--compression', dest='compression',
@@ -73,7 +83,7 @@ if __name__=="__main__":
     parser.add_argument('-a', '--archive', dest='archive',
                         default=False, const=True, action='store_const',
                         help="Archive the snapshots as they're taken, by "
-                        "default in DATA_DIR/webcam_archive.zip (option --dir)")
+                        'default in DATA_DIR/webcam_archive.zip (option --dir)')
 
     parser.add_argument('--dir', dest='dir', default=None,
                         help=('Directory in which to store the images: '
@@ -118,10 +128,18 @@ if __name__=="__main__":
         if verbose: print('[i] No resize necessary')
         resize = None
 
+    if not args.passwordp:
+        password = None
+    else:
+        if args.password:
+            password = args.password
+        else:
+            password = getpass.getpass()
+
     if args.daemonize:
         if verbose: print('[i] Daemonizing...')
         with daemon.DaemonContext():
             main_loop(args.format, directory, compression, resize, args.archive,
-                      verbose)
+                      password, verbose)
     main_loop(args.format, directory, compression, resize, args.archive,
-              verbose)
+              password, verbose)
