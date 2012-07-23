@@ -6,6 +6,7 @@ import hashlib
 from Crypto.Cipher import Blowfish, AES
 from os import urandom
 import math
+import re
 
 class EncryptedFile(object):
     BLOWFISH = 4
@@ -23,7 +24,7 @@ class EncryptedFile(object):
     HASH_SHA384 = 9
     HASH_SHA512 = 10
 
-    def __init__(self, file_obj, encryption_key, mode='wb', iv=None,
+    def __init__(self, file_obj, encryption_key, mode='w', iv=None,
                  block_size=16, buffer_size=1024, timestamp=None):
         '''
         Open a pipe to an encrypted file
@@ -49,8 +50,9 @@ class EncryptedFile(object):
         self.buffer_size = buffer_size
 
         self.mode = mode
+        self.bin_mode = False
         if len(self.mode)>1:
-            self.bin_mode = self.mode[1] == 'b'
+            self.bin_mode = (self.mode[1] == 'b')
         self._raw_buffer = ''
         self._lit_buffer = ''
         self._enc_buffer = ''
@@ -178,6 +180,11 @@ class EncryptedFile(object):
         self._encrypt_buffer(final=final)
 
     def write(self, data):
+        # make sure the data
+        ### WE DO NOT HANDLE CR/LF SEQUENCES SPLIT ACROSS WRITES
+        if not self.bin_mode:
+            data = re.sub('[^\r]\n', '\r\n', data)
+            data = re.sub('\r[^\n]', '\r\n', data)
         self._raw_buffer += data
         self._write_buffer()
     def writelines(self, lines):
@@ -212,7 +219,12 @@ if __name__=='__main__':
     import time
     m = hashlib.sha256()
     m.update(time.ctime())
-    msg = 'aa' * 1000
+    msg = '''Hello world
+I want to take your socks away from you
+yes
+yes
+aruh.r,chuett
+uhr.,chrd,uhetonhih'''
     print(msg)
 
     b = EncryptedFile('mu.gpg', encryption_key='w')
