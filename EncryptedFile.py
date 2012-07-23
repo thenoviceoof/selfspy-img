@@ -5,6 +5,7 @@
 import hashlib
 from Crypto.Cipher import Blowfish, AES
 from os import urandom
+import math
 
 class EncryptedFile(object):
     BLOWFISH = 4
@@ -48,6 +49,7 @@ class EncryptedFile(object):
         self.buffer_size = buffer_size
 
         self.mode = mode
+        self.raw_buffer = ''
         self.lit_buffer = ''
         self.enc_buffer = ''
         self.closed = False
@@ -89,20 +91,19 @@ class EncryptedFile(object):
 
         # add the literal block id byte to the unencrypted buffer
         self.lit_buffer += chr((1 << 7) | (1 << 6) | 11)
-        self._first = True
         ### !!! mode ['b', 't']
-        self.lit_buffer += 'b'
+        self.raw_buffer += 'b'
         # write out file name
-        self.lit_buffer += chr(len(self.name))
-        self.lit_buffer += self.name
+        self.raw_buffer += chr(len(self.name))
+        self.raw_buffer += self.name
         # write out 4-octet date
         if timestamp:
-            self.lit_buffer += chr(timestamp >> 24 & 0xff)
-            self.lit_buffer += chr(timestamp >> 16 & 0xff)
-            self.lit_buffer += chr(timestamp >> 8  & 0xff)
-            self.lit_buffer += chr(timestamp & 0xff)
+            self.raw_buffer += chr(timestamp >> 24 & 0xff)
+            self.raw_buffer += chr(timestamp >> 16 & 0xff)
+            self.raw_buffer += chr(timestamp >> 8  & 0xff)
+            self.raw_buffer += chr(timestamp & 0xff)
         else:
-            self.lit_buffer += '\0'*4
+            self.raw_buffer += '\0'*4
 
     def _semi_length(self):
         '''
@@ -146,33 +147,43 @@ class EncryptedFile(object):
         if final:
             self.file.write(self._final_length(len(self.enc_buffer)))
             self.file.write(self.enc_buffer)
-    def _write_buffer(self, final=False):
+    def _encrypt_buffer(self, final=False):
         '''
-        Given things in the literal buffer, encrypt and put them in the
-        encrypted buffer
+        Given literal packet data, encrypt it
         '''
-        i = 0
-        while len(self.lit_buffer) >= self.buffer_size:
-            if self._first:
-                self.lit_buffer += 
-                self.lit_buffer += self._semi_length()
-                self._first = False
-            self.lit_buffer += 
-            self.lit_buffer += 
-            self.enc_buffer += self.cipher.encrypt(self._semi_length())
-            # write/encrypt the literal data in blocks
-            start = self.blocksize * i
-            end = self.blocksize * (i + 1)
-            self.enc_buffer += self.cipher.encrypt(self.lit_buffer[start:end])
-            i += 1
-        self.lit_buffer = self.lit_buffer[self.buffer_size * i:]
+        cnt = int(math.floor(len(self.lit_buffer)/self.block_size))
+        bs = cnt * self.block_size
+        # encrypt all data that fits cleanly in the block size
+        self.enc_buffer += self.cipher.encrypt(self.lit_buffer[:bs])
+        self.lit_buffer = self.lit_buffer[bs:]
 
         if final:
-            final_len = self._final_length(len(self.lit_buffer))
-            self.lit_buffer += final_len
             self.enc_buffer += self.cipher.encrypt(self.lit_buffer)
 
         self._write_enc_buffer(final=final)
+    def _write_buffer(self, final=False):
+        '''
+        Given things in the raw buffer, attach metadata and put them
+        in the literal buffer
+        '''
+        i = 0
+        # add the literal data packet metadata
+        while len(self.raw_buffer) >= self.buffer_size:
+            self.lit_buffer += self._semi_length()
+            # write/encrypt the literal data in blocks
+            start = self.buffer_size * i
+            end = self.buffer_size * (i + 1)
+            self.lit_buffer += self.raw_buffer[start:end]
+            i += 1
+        self.raw_buffer = self.raw_buffer[self.buffer_size * i:]
+
+        if final:
+            final_len = self._final_length(len(self.raw_buffer))
+            self.lit_buffer += final_len
+            self.lit_buffer += self.raw_buffer
+            self.raw_buffer = ''
+
+        self._encrypt_buffer(final=final)
 
     def write(self, data):
         self.lit_buffer += data
