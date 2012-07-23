@@ -9,6 +9,7 @@ import math
 import re
 
 class EncryptedFile(object):
+    # OpenPGP values
     ALGO_BLOWFISH = 4
     ALGO_AES128 = 7
     ALGO_AES196 = 8
@@ -23,6 +24,27 @@ class EncryptedFile(object):
     HASH_SHA256 = 8
     HASH_SHA384 = 9
     HASH_SHA512 = 10
+
+    # things mapping OpenPGP values to Python values
+    ENCRYPTION_ALGOS = {
+        ALGO_BLOWFISH : Blowfish,
+        ALGO_AES128: AES,
+        ALGO_AES196: AES,
+        ALGO_AES256: AES,
+        }
+    KEY_SIZES = {
+        ALGO_BLOWFISH : 16,
+        ALGO_AES128: 16,
+        ALGO_AES196: 24,
+        ALGO_AES256: 32,
+        }
+    HASHES = {
+        HASH_MD5: hashlib.md5,
+        HASH_SHA1: hashlib.sha1,
+        HASH_SHA256: hashlib.sha256,
+        HASH_SHA384: hashlib.sha384,
+        HASH_SHA512: hashlib.sha512,
+        }
 
     def __init__(self, file_obj, pass_phrase, mode='w', iv=None, salt=None,
                  block_size=16, buffer_size=1024, timestamp=None,
@@ -119,28 +141,37 @@ class EncryptedFile(object):
         else:
             raise ValueError('Only \'wb\' mode supported')
 
-        if key_method == self.S2K_SIMPLE:
-            hsh = hashlib.sha256()
-            hsh.update(pass_phrase)
-            self.key = hsh.digest()
-        elif key_method == self.S2K_SALTED:
-            hsh = hashlib.sha256()
-            hsh.update(salt)
-            hsh.update(pass_phrase)
-            self.key = hsh.digest()
-        elif key_method == self.S2K_ITERATED:
-            # hash <count> number of bytes
-            hsh = hashlib.sha256()
-            i = 0
-            key = salt + pass_phrase
-            while i + len(key) < count:
-                hsh.update(key)
-                i += len(key)
-            hsh.update(key[:count - i])
-            self.key = hsh.digest()
+        def gen_key(key_method, hash_algo, pass_phrase, salt, it=0):
+            '''
+            utility function to generate S2K keys
+            '''
+            hsh = self.HASHES[hash_algo]()
+            hsh.update(chr(0) * it)
+            if key_method == self.S2K_SIMPLE:
+                hsh.update(pass_phrase)
+            elif key_method == self.S2K_SALTED:
+                hsh.update(salt)
+                hsh.update(pass_phrase)
+            elif key_method == self.S2K_ITERATED:
+                # hash <count> number of bytes
+                i = 0
+                key = salt + pass_phrase
+                while i + len(key) < count:
+                    hsh.update(key)
+                    i += len(key)
+                hsh.update(key[:count - i])
+            return hsh.digest()
 
-        self.cipher = AES.new(self.key, AES.MODE_OPENPGP,
-                              self.iv, block_size = block_size)
+        self.key = ''
+        i = 0
+        while len(self.key) < self.KEY_SIZES[encryption_algo]:
+            self.key += gen_key(key_method, hash_algo, pass_phrase, salt, i)
+            i += 1
+        self.key = self.key[:self.KEY_SIZES[encryption_algo]]
+
+        cipher = self.ENCRYPTION_ALGOS[encryption_algo]
+        self.cipher = cipher.new(self.key, cipher.MODE_OPENPGP,
+                                 self.iv, block_size = block_size)
 
         # add the literal block id byte to the unencrypted buffer
         self._lit_buffer += chr((1 << 7) | (1 << 6) | 11)
