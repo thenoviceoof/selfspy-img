@@ -58,7 +58,7 @@ class EncryptedFile(object):
             if len(file_obj) > 0xff:
                 raise ValueError('File name is too long')
             self.file = open(file_obj, mode)
-            self.name = file_obj
+            self.name = file_obj ### !!!
         elif isinstance(file_obj, file):
             self.file = file_obj
             self.name = file_obj.name[:0xff]
@@ -92,7 +92,7 @@ class EncryptedFile(object):
         # add the literal block id byte to the unencrypted buffer
         self.lit_buffer += chr((1 << 7) | (1 << 6) | 11)
         ### !!! mode ['b', 't']
-        self.raw_buffer += 'b'
+        self.raw_buffer += chr(0x62) #'b'
         # write out file name
         self.raw_buffer += chr(len(self.name))
         self.raw_buffer += self.name
@@ -103,7 +103,7 @@ class EncryptedFile(object):
             self.raw_buffer += chr(timestamp >> 8  & 0xff)
             self.raw_buffer += chr(timestamp & 0xff)
         else:
-            self.raw_buffer += '\0'*4
+            self.raw_buffer += '\0' * 4
 
     def _semi_length(self):
         '''
@@ -181,12 +181,11 @@ class EncryptedFile(object):
             final_len = self._final_length(len(self.raw_buffer))
             self.lit_buffer += final_len
             self.lit_buffer += self.raw_buffer
-            self.raw_buffer = ''
 
         self._encrypt_buffer(final=final)
 
     def write(self, data):
-        self.lit_buffer += data
+        self.raw_buffer += data
         self._write_buffer()
     def writelines():
         pass
@@ -215,7 +214,7 @@ if __name__=='__main__':
     import time
     m = hashlib.sha256()
     m.update(time.ctime())
-    msg = 'Hello world'
+    msg = 'aa'
     print(msg)
 
     b = EncryptedFile('mu.gpg', encryption_key='w')
