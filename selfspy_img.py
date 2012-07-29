@@ -10,6 +10,8 @@ import sys
 import time
 import getpass
 
+import math
+
 import Image # PIL
 import zipfile
 from EncryptedFile import EncryptedFile
@@ -29,14 +31,94 @@ def error(msg):
 ################################################################################
 # main
 
+def get_webcam_img(cv, cap):
+    '''
+    cv: because not imported into the top level
+    cap: keep this guy around
+    '''
+    def shot():
+        frame = cv.QueryFrame(cap)
+        # BGR is the default colorspace for opencv
+        cv.CvtColor(frame,frame, cv.CV_BGR2RGB)
+        webcam_img = Image.fromstring("RGB", cv.GetSize(frame), frame.tostring())
+        return webcam_img
+    return shot
+
+def get_gtk_screenshot(gtk):
+    '''
+    gtk: because not imported into the top level
+    '''
+    def screenshot():
+        w = gtk.gdk.get_default_root_window()
+        size = w.get_size()
+        pb = gtk.gdk.Pixbuf(gtk.gdk.COLORSPACE_RGB, False, 8,
+                            size[0], size[1])
+        pb = pb.get_from_drawable(w, w.get_colormap(), 0,0,0,0,
+                                  size[0], size[1])
+        # something has gone wrong, abort
+        if pb is None:
+            return None
+        # handle non-4x rows
+        pxs = pb.get_pixels()
+        if len(pxs) != size[0]*size[1]*3:
+            new = ''
+            stride = int(math.ceil(len(pxs)/size[1])/4.)*4
+            for i in range(size[1]):
+                start = i*stride
+                new += pxs[start:start+3*size[0]]
+            pxs = new
+        screen_img = Image.fromstring("RGB", (size[0], size[1]),
+                                      pxs)
+        return screen_img
+    return screenshot
+
+def get_save(path, getter, file_type='JPEG', resize=False,
+             compression=None, archive=None, password=None):
+    '''
+    path: save to
+    getter: function to retrieve image with
+    file_type: PIL save as
+    resize: False, no resizing, otherwise (w,h)
+    compression: compression factor
+    archive: whether or not to archive the image after saving
+    password: pass_phrase with which to save the image
+    '''
+    if verbose: debug('Retrieving file...')
+    img = getter()
+    if img is None:
+        if verbose: debug('No Image handed back, aborting...')
+        return
+
+    if resize:
+        if verbose: debug('Resizing...')
+        img = img.resize(resize)
+
+    if verbose: debug('Opening file...')
+    f = open(path, "wb")
+
+    if password:
+        if verbose: debug('Encrypting image...')
+        f = EncryptedFile(f, pass_phrase=password, mode='wb',
+                          encryption_algo=EncryptedFile.ALGO_BLOWFISH)
+    img.save(f, file_type, quality=compression)
+    f.close()
+
+    if archive:
+        if verbose: debug('Archiving...')
+        archive = zipfile.ZipFile(archive, 'a', zipfile.ZIP_DEFLATED)
+        archive.write(path, os.path.basename(path))
+        archive.close()
+        os.remove(path)
+
+
 def main_loop(filename_format, data_directory, compression, webcam_resize,
               screen_resize, archive, password, verbose, interval):
 
+    # do an initial computation
     if webcam_resize:
         import cv
         cap = cv.CaptureFromCAM(0)
 
-        # do an initial computation
         frame = cv.QueryFrame(cap)
         if cv.GetSize(frame) == webcam_resize:
             if verbose: debug('No resize necessary')
@@ -44,50 +126,33 @@ def main_loop(filename_format, data_directory, compression, webcam_resize,
 
     if screen_resize:
         import gtk.gdk
+        if screen_resize == 1.0:
+            screen_resize = False
+        else:
+            img = get_gtk_screenshot(gtk)()
+            screen_resize = [int(s*screen_resize) for s in img.size]
 
     # make sure the zipfile is still there
     if archive:
-        archive_path = '%s/images_archive.zip' % data_directory
-        archive = zipfile.ZipFile(archive_path, 'a', zipfile.ZIP_DEFLATED)
-
+        archive = '%s/images_archive.zip' % data_directory
 
     while True:
         timestamp = time.strftime(filename_format)
         if verbose: debug('Taking shot at %s' % timestamp)
 
-        # get image paths
         if webcam_resize is not None:
             webcam_img_path = '%s/webcam/%s.jpg' % (data_directory, timestamp)
             if password:
                 webcam_img_path += '.gpg'
-        if screenp is not None:
-            screen_img_path = '%s/screen/%s.jpg' % (data_directory, timestamp)
+            get_save(webcam_img_path, get_webcam_img(cv, cap), 'JPEG',
+                     webcam_resize, compression, archive, password)
+
+        if screen_resize is not None:
+            screen_img_path = '%s/screenshot/%s.png' % (data_directory, timestamp)
             if password:
-                webcam_img_path += '.gpg'
-
-        if webcam_resize is not None:
-            frame = cv.QueryFrame(cap)
-            # BGR is the default colorspace for opencv
-            cv.CvtColor(frame,frame, cv.CV_BGR2RGB)
-            webcam_img = Image.fromstring("RGB", cv.GetSize(frame), frame.tostring())
-
-        if webcam_resize:
-            if verbose: debug('Resizing...')
-            webcam_img = webcam_img.resize(webcam_resize)
-
-        if verbose: debug('Saving to path %s' % webcam_img_path)
-        wf = open(webcam_img_path, "wb")
-        if password:
-            if verbose: debug('Encrypting file...')
-            wf = EncryptedFile(wf, pass_phrase=password, mode='wb',
-                              encryption_algo=EncryptedFile.ALGO_BLOWFISH)
-        webcam_img.save(wf, 'JPEG', quality=compression)
-        wf.close()
-
-        if archive:
-            if verbose: debug('Archiving...')
-            archive.write(webcam_img_path, os.path.basename(webcam_img_path))
-            os.remove(webcam_img_path)
+                screen_img_path += '.gpg'
+            get_save(screen_img_path, get_gtk_screenshot(gtk), 'PNG',
+                     screen_resize, 9, archive, password)
 
         if verbose: debug('Done, sleeping...')
         time.sleep(args.interval)
@@ -183,23 +248,24 @@ if __name__=="__main__":
     if webcamp:
         webcam_dir = directory + 'webcam/'
         if not os.path.exists(webcam_dir):
-            if verbose: debug('[i] Creating necessary directory')
+            if verbose: debug('Creating necessary directory')
             os.makedirs(webcam_dir)
     if screenp:
         screen_dir = directory + 'screenshot/'
         if not os.path.exists(screen_dir):
-            if verbose: debug('[i] Creating necessary directory')
+            if verbose: debug('Creating necessary directory')
             os.makedirs(screen_dir)
 
+    # precomute some stuff
     compression = max(1, min(args.compression, 95))
     webcam_resize = None
     screen_resize = None
     if webcamp:
         webcam_resize = tuple([int(s) for s in args.webcam_size.split("x")])[0:2]
-        if verbose: debug('resizing webcam output to %dx%d' % webcam_resize)
+        if verbose: debug('Resizing webcam output to %dx%d' % webcam_resize)
     if screenp:
         screen_resize = args.screenshot_size
-        if verbose: debug('resizing screenshots to %f' % screen_resize)
+        if verbose: debug('Resizing screenshots to %f' % screen_resize)
 
     # password
     if not args.passwordp:
