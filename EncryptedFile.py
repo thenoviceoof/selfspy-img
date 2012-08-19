@@ -266,9 +266,9 @@ class EncryptedFile(object):
         if not self.bin_mode:
             self._raw_buffer = re.sub('([^\r])\n', '\\1\r\n', self._raw_buffer)
             self._raw_buffer = re.sub('\r([^\n])', '\r\n\\1', self._raw_buffer)
-        if self._raw_buffer[-1] == '\r':
-            # don't write yet: we might have more coming
-            return
+            if self._raw_buffer[-1] == '\r':
+                # don't write yet: we might have more coming (\r\n pairs)
+                return
         self._write_buffer()
     def writelines(self, lines):
         if self.bin_mode:
