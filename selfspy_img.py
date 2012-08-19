@@ -14,7 +14,7 @@ import math
 
 import Image # PIL
 import zipfile
-from EncryptedFile import EncryptedFile
+from encrypt.EncryptedFile import EncryptedFile
 
 
 ################################################################################
