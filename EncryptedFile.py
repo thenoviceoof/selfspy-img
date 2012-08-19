@@ -1,7 +1,3 @@
-# EncryptedFile
-# File object
-################################################################################
-
 import hashlib
 from Crypto.Cipher import Blowfish, AES
 from os import urandom
@@ -9,6 +5,11 @@ import math
 import re
 
 class EncryptedFile(object):
+    '''
+    A transparent, write-only file-like object
+
+    Creates OpenPGP compatible encrypted files
+    '''
     # OpenPGP values
     ALGO_BLOWFISH = 4
     ALGO_AES128 = 7
@@ -101,6 +102,7 @@ class EncryptedFile(object):
         else:
             raise TypeError
 
+        # we are write-only at the moment
         if mode[0] == 'w':
             if not iv:
                 self.iv = urandom(self.block_size)
@@ -261,7 +263,7 @@ class EncryptedFile(object):
         self._encrypt_buffer(final=final)
 
     def write(self, data):
-        # make sure the data
+        # make sure the data is there
         self._raw_buffer += data
         if not self.bin_mode:
             self._raw_buffer = re.sub('([^\r])\n', '\\1\r\n', self._raw_buffer)
@@ -277,14 +279,16 @@ class EncryptedFile(object):
             line = re.sub('([^\r])\n', '\\1\r\n', line)
             line = re.sub('\r([^\n])', '\r\n\\1', line)
             self._raw_buffer += line
-            self._raw_buffer += '\r\n' # use CR/LF
+            self._raw_buffer += '\r\n' # use CR/LF, network newlines
         self._write_buffer()
 
+    # reading is hard
     def read(self, *args, **kwargs):
         raise NotImplementedError()
     def readlines(self, *args, **kwargs):
         raise NotImplementedError()
 
+    # so is seeking
     def seek(self, offset, whence=None):
         raise NotImplementedError()
     def tell(self):
@@ -299,7 +303,8 @@ class EncryptedFile(object):
 
     def flush(self):
         '''
-        Merely flushes the encapsulated file object
+        Merely flushes the encapsulated file object. If there's
+        stuff in the buffer, there's a good reason for it.
         '''
         self.file.flush()
     def isatty(self):
@@ -309,7 +314,7 @@ if __name__=='__main__':
     '''
     Documentation and self-testing
 
-    To decrypt:
+    To decrypt with gpg:
     gpg <file name>
     '''
     msg = '''Hello world'''
