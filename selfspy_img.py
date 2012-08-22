@@ -81,7 +81,7 @@ def get_save(path, getter, file_type='JPEG', resize=False,
     resize: False, no resizing, otherwise (w,h)
     compression: compression factor
     archive: whether or not to archive the image after saving
-    password: pass_phrase with which to save the image
+    password: passphrase with which to save the image
     '''
     if verbose: debug('Retrieving file...')
     img = getter()
@@ -98,7 +98,7 @@ def get_save(path, getter, file_type='JPEG', resize=False,
 
     if password:
         if verbose: debug('Encrypting image...')
-        f = EncryptedFile(f, pass_phrase=password, mode='wb',
+        f = EncryptedFile(f, passphrase=password, mode='wb',
                           encryption_algo=EncryptedFile.ALGO_BLOWFISH)
     img.save(f, file_type, quality=compression)
     f.close()
