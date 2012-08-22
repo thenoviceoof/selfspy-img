@@ -53,8 +53,8 @@ class EncryptedFile(object):
         HASH_SHA512: hashlib.sha512,
         }
 
-    def __init__(self, file_obj, pass_phrase, mode='w', iv=None, salt=None,
-                 block_size=8, buffer_size=1024, timestamp=None,
+    def __init__(self, file_obj, passphrase, mode='w', iv=None, salt=None,
+                 block_size=16, buffer_size=1024, timestamp=None,
                  encryption_algo=ALGO_AES256, hash_algo=HASH_SHA256,
                  key_method=S2K_ITERATED, iterated_count=(16, 6)):
         '''
@@ -64,7 +64,7 @@ class EncryptedFile(object):
             a string should be a path
             file object: write through to the file
 
-        pass_phrase: passphrase
+        passphrase: passphrase
         mode: usual file modes
 
         iv: initialization vector, randomly generated if not
@@ -173,7 +173,7 @@ class EncryptedFile(object):
         self.key = ''
         i = 0
         while len(self.key) < self.KEY_SIZES[encryption_algo]:
-            self.key += gen_key(key_method, hash_algo, pass_phrase, salt, i)
+            self.key += gen_key(key_method, hash_algo, passphrase, salt, i)
             i += 1
         self.key = self.key[:self.KEY_SIZES[encryption_algo]]
 
@@ -196,6 +196,13 @@ class EncryptedFile(object):
             self._raw_buffer += chr(timestamp & 0xff)
         else:
             self._raw_buffer += '\0' * 4
+        self.count = 0
+
+    # handle {with EncryptedFile(...) as f:} notation
+    def __enter__(self):
+        return self
+    def __exit__(self, type, value, traceback):
+        self.close()
 
     def _semi_length(self):
         '''
@@ -270,6 +277,7 @@ class EncryptedFile(object):
 
     def write(self, data):
         # make sure the data is there
+        self.count += len(data)
         self._raw_buffer += data
         if not self.bin_mode:
             self._raw_buffer = re.sub('([^\r])\n', '\\1\r\n', self._raw_buffer)
@@ -297,10 +305,13 @@ class EncryptedFile(object):
     # so is seeking
     def seek(self, offset, whence=None):
         raise NotImplementedError()
+
     def tell(self):
-        raise NotImplementedError()
+        return self.count
 
     def close(self):
+        if self.file.closed:
+            return
         # make sure we catch a final \r, which was waiting for the next write
         if not self.bin_mode and self._raw_buffer[-1] == '\r':
             self._raw_buffer += '\n'
@@ -326,6 +337,6 @@ if __name__=='__main__':
     msg = '''Hello world'''
     print("Encrypted message:")
     print(msg)
-    b = EncryptedFile('example.gpg', pass_phrase='w')
+    b = EncryptedFile('example.gpg', passphrase='w')
     b.write(msg)
     b.close()
